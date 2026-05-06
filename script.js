@@ -779,6 +779,8 @@ function renderAll() {
   renderStockTable();
 }
 
-updateStockDependentOptions();
-bindEvents();
-renderAll();
+document.addEventListener("DOMContentLoaded", () => {
+  updateStockDependentOptions();
+  bindEvents();
+  renderAll();
+});
