@@ -69,8 +69,9 @@
   .content-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
   .section { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
   .section.full { grid-column: 1/-1; }
-  .section-header { display: flex; align-items: center; padding: 16px 20px; border-bottom: 1px solid var(--border); gap: 10px; }
-  .section-header h2 { font-size: 14px; font-weight: 600; flex: 1; }
+  .section-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border); gap: 10px; }
+  .section-header h2 { font-size: 14px; font-weight: 600; flex: 1; min-width: 180px; }
+  .section-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .badge { font-size: 11px; font-family: var(--mono); background: rgba(255,255,255,0.06); border: 1px solid var(--border); color: var(--text-dim); border-radius: 20px; padding: 2px 8px; }
 
   .btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 8px; font-family: var(--font); font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; border: none; }
@@ -267,15 +268,21 @@
     <div class="page" id="page-stock">
       <div class="section full">
         <div class="section-header">
-          <h2>สต็อกสินค้า</h2>
-          <span class="badge" id="stock-count-badge">0 รายการ</span>
-          <button class="btn btn-primary" onclick="openModal('stock')">+ เพิ่มสินค้า</button>
+          <div>
+            <h2>สต็อกสินค้า</h2>
+            <span class="badge" id="stock-count-badge">0 รายการ</span>
+          </div>
+          <div class="section-actions">
+            <button class="btn btn-primary" onclick="openModal('stock')">+ เพิ่มสินค้า</button>
+            <button class="btn btn-ghost" onclick="document.getElementById('stock-xlsx-file').click()">นำเข้าจากไฟล์ XLSX</button>
+          </div>
+          <input type="file" id="stock-xlsx-file" accept=".xlsx,.xls,.csv" style="display:none" onchange="importStockXlsx(event)">
         </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>ชื่อสินค้า</th><th>จำนวนคงเหลือ</th><th>ราคาต้นทุน (ต่อหน่วย)</th><th>ราคาขาย (ต่อหน่วย)</th><th>มูลค่ารวม</th><th></th></tr></thead>
+            <thead><tr><th>ชื่อสินค้า</th><th>รายละเอียด</th><th>จำนวนคงเหลือ</th><th>ราคาต้นทุน (ต่อหน่วย)</th><th>ราคาขาย (ต่อหน่วย)</th><th>มูลค่ารวม</th><th></th></tr></thead>
             <tbody id="stock-table">
-              <tr><td colspan="6"><div class="empty"><div class="icon">📦</div>ยังไม่มีสินค้าในสต็อก</div></td></tr>
+              <tr><td colspan="7"><div class="empty"><div class="icon">📦</div>ยังไม่มีสินค้าในสต็อก</div></td></tr>
             </tbody>
           </table>
         </div>
@@ -452,7 +459,7 @@
     </div>
   </div>
 </div>
-
+<script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
 <script>
 var currentMonth = new Date().getMonth();
 var currentYear  = new Date().getFullYear();
@@ -588,6 +595,102 @@ function saveStock() {
   save(); closeModal('stock'); renderAll();
 }
 
+function parseNumber(value) {
+  if (value === null || value === undefined) return NaN;
+  var str = String(value).trim().replace(/,/g, '');
+  return parseFloat(str);
+}
+
+function normalizeKey(value) {
+  return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function importStockXlsx(event) {
+  var file = event.target.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      var dataBuf = e.target.result;
+      var workbook = XLSX.read(dataBuf, { type: 'array' });
+      var sheetName = workbook.SheetNames[0];
+      var sheet = workbook.Sheets[sheetName];
+      var rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+      if (!rows.length) {
+        alert('ไม่พบข้อมูลในไฟล์');
+        return;
+      }
+
+      var mappedHeaders = {};
+      Object.keys(rows[0]).forEach(function(header) {
+        mappedHeaders[normalizeKey(header)] = header;
+      });
+
+      function getCell(row, names) {
+        for (var i = 0; i < names.length; i++) {
+          var key = normalizeKey(names[i]);
+          if (mappedHeaders[key]) return row[mappedHeaders[key]];
+        }
+        return '';
+      }
+
+      var imported = 0;
+      var skipped = 0;
+      rows.forEach(function(row) {
+        var name = String(getCell(row, ['ชื่อสินค้า', 'name', 'product', 'item'])).trim();
+        var quantity = parseInt(parseNumber(getCell(row, ['จำนวนคงเหลือ', 'จำนวน', 'quantity', 'qty'])), 10);
+        var unit = String(getCell(row, ['หน่วย', 'unit'])).trim() || 'ชิ้น';
+        var cost = parseNumber(getCell(row, ['ราคาต้นทุน', 'cost', 'unit cost', 'ต้นทุน']));
+        var price = parseNumber(getCell(row, ['ราคาขาย', 'price', 'sale price', 'selling price']));
+        var desc = String(getCell(row, ['รายละเอียด', 'desc', 'description', 'note'])).trim();
+
+        if (!name || isNaN(quantity) || quantity < 0 || isNaN(cost) || cost < 0 || isNaN(price) || price < 0) {
+          skipped++;
+          return;
+        }
+
+        var normalizedName = normalizeKey(name);
+        var existing = data.stock.find(function(item) {
+          return normalizeKey(item.name) === normalizedName;
+        });
+
+        if (existing) {
+          existing.quantity = quantity;
+          existing.unit = unit;
+          existing.cost = cost;
+          existing.price = price;
+          existing.desc = desc;
+        } else {
+          data.stock.push({
+            id: Date.now() + imported,
+            name: name,
+            quantity: quantity,
+            unit: unit,
+            cost: cost,
+            price: price,
+            desc: desc
+          });
+        }
+        imported++;
+      });
+
+      if (imported) {
+        save();
+        renderAll();
+      }
+
+      var message = 'นำเข้าสต็อกสำเร็จ ' + imported + ' รายการ';
+      if (skipped) message += ' (ข้าม ' + skipped + ' แถวไม่ถูกต้อง)';
+      alert(message);
+    } catch (err) {
+      alert('ไม่สามารถอ่านไฟล์ได้ โปรดตรวจสอบว่าเป็นไฟล์ XLSX ที่ถูกต้อง');
+    } finally {
+      event.target.value = '';
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
 function delRecord(type, id) {
   if (!confirm('\u0E25\u0E1A\u0E23\u0E32\u0E22\u0E01\u0E32\u0E23\u0E19\u0E35\u0E49?')) return;
   data[type] = data[type].filter(function(r) { return r.id !== id; });
@@ -718,6 +821,7 @@ function renderAll() {
       var totalValue = r.quantity * r.cost;
       return '<tr>' +
         '<td>' + r.name + '</td>' +
+        '<td style="color:var(--text-dim)">' + (r.desc || '-') + '</td>' +
         '<td>' + r.quantity + ' ' + r.unit + '</td>' +
         '<td class="amount-cell">' + fmt(r.cost) + '</td>' +
         '<td class="amount-cell">' + fmt(r.price) + '</td>' +
