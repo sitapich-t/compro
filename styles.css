@@ -297,7 +297,7 @@ textarea {
   color: #dc2626;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 480px) {
   * {
     max-width: 100%;
   }
